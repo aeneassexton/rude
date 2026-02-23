@@ -19,6 +19,7 @@ from typing import Optional
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -295,6 +296,12 @@ def get_rhythm(user_id: str, year: int = 0, month: int = 0):
             )
 
     return RhythmResponse(user_id=user_id, month=month_str, history=history)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect root to interactive API docs."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
