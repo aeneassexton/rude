@@ -230,3 +230,105 @@ class MoodStore:
         new_row = pd.DataFrame([features])
         df = pd.concat([self._parquet_load_features(), new_row], ignore_index=True)
         df.to_parquet(self._feat_path, index=False)
+
+
+# ---------------------------------------------------------------------------
+# WeatherStore
+# ---------------------------------------------------------------------------
+class WeatherStore:
+    """Per-user weather log."""
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        self._path = DATA_DIR / f"weather_{user_id}.parquet"
+
+    def append_weather(self, features: dict, lat: float, lon: float, log_date: date | None = None) -> None:
+        log_date = log_date or date.today()
+        payload = {"user_id": self.user_id, "date": str(log_date), "lat": lat, "lon": lon, **features}
+
+        if _USE_SUPABASE:
+            try:
+                _sb.table("weather_logs").upsert(payload, on_conflict="user_id,date").execute()
+                return
+            except Exception as exc:
+                logger.error("supabase append_weather failed user=%s: %s", self.user_id, exc)
+
+        new_row = pd.DataFrame([payload])
+        df = pd.concat([self._load_parquet(), new_row], ignore_index=True)
+        df = df.drop_duplicates(subset=["date"], keep="last")
+        df.to_parquet(self._path, index=False)
+
+    def load_latest(self) -> dict | None:
+        if _USE_SUPABASE:
+            try:
+                resp = (_sb.table("weather_logs")
+                    .select("*").eq("user_id", self.user_id)
+                    .order("date", desc=True).limit(1).execute())
+                return resp.data[0] if resp.data else None
+            except Exception as exc:
+                logger.error("supabase load_weather failed user=%s: %s", self.user_id, exc)
+                return None
+
+        df = self._load_parquet()
+        return df.iloc[-1].to_dict() if not df.empty else None
+
+    def _load_parquet(self) -> "pd.DataFrame":
+        if self._path.exists():
+            return pd.read_parquet(self._path)
+        return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# CycleStore
+# ---------------------------------------------------------------------------
+class CycleStore:
+    """Per-user menstrual cycle log."""
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        self._path = DATA_DIR / f"cycle_{user_id}.parquet"
+
+    def log_period(self, period_start: date, cycle_length: int = 28) -> None:
+        payload = {
+            "user_id": self.user_id,
+            "period_start": str(period_start),
+            "cycle_length": cycle_length,
+        }
+        if _USE_SUPABASE:
+            try:
+                _sb.table("cycle_logs").insert(payload).execute()
+                logger.info("store cycle user=%s period_start=%s", self.user_id, period_start)
+                return
+            except Exception as exc:
+                logger.error("supabase log_period failed user=%s: %s", self.user_id, exc)
+
+        new_row = pd.DataFrame([payload])
+        df = pd.concat([self._load_parquet(), new_row], ignore_index=True)
+        df.to_parquet(self._path, index=False)
+
+    def load_latest_period(self) -> tuple[date | None, int]:
+        """Return (most_recent_period_start, cycle_length)."""
+        if _USE_SUPABASE:
+            try:
+                resp = (_sb.table("cycle_logs")
+                    .select("period_start, cycle_length")
+                    .eq("user_id", self.user_id)
+                    .order("period_start", desc=True).limit(1).execute())
+                if resp.data:
+                    row = resp.data[0]
+                    return date.fromisoformat(row["period_start"]), int(row["cycle_length"])
+                return None, 28
+            except Exception as exc:
+                logger.error("supabase load_period failed user=%s: %s", self.user_id, exc)
+                return None, 28
+
+        df = self._load_parquet()
+        if df.empty:
+            return None, 28
+        row = df.iloc[-1]
+        return date.fromisoformat(str(row["period_start"])), int(row["cycle_length"])
+
+    def _load_parquet(self) -> "pd.DataFrame":
+        if self._path.exists():
+            return pd.read_parquet(self._path)
+        return pd.DataFrame()

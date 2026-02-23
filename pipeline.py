@@ -6,6 +6,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from datetime import date
 from utils import load_history_df
 from nodes import (
     run_ingestion,
@@ -18,6 +19,8 @@ from nodes import (
     run_anomaly,
 )
 from nodes.node_1_ingestion import MockAdapter, AppleHealthAdapter, IngestionAdapter
+from nodes.node_environmental import run as run_environmental
+from nodes.node_hormonal import run as run_hormonal
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +63,12 @@ def run_pipeline(
     use_mock_ingestion: bool = True,
     ingestion_adapter: "IngestionAdapter | None" = None,
     bayesian_method: str = "map",
+    # Layer D — Environmental
+    lat: "float | None" = None,
+    lon: "float | None" = None,
+    # Layer C — Hormonal
+    period_start: "date | None" = None,
+    cycle_length: int = 28,
 ) -> dict:
     """Run the full behavioural forecasting pipeline.
 
@@ -98,6 +107,26 @@ def run_pipeline(
         logger.info("pipeline=bfe ingestion=apple_health")
 
     df_new, _daily_features = run_ingestion(user_id=user_id, adapter=adapter)
+
+    # ------------------------------------------------------------------
+    # Layer D: Environmental features (appended to today's row)
+    # ------------------------------------------------------------------
+    if lat is not None and lon is not None:
+        env_features = run_environmental(lat=lat, lon=lon)
+        for k, v in env_features.items():
+            df_new[k] = v
+        logger.info("pipeline=bfe environmental=fetched temp=%.1f", env_features["temperature_c"])
+    else:
+        logger.info("pipeline=bfe environmental=skipped reason=no_location")
+
+    # ------------------------------------------------------------------
+    # Layer C: Hormonal phase features (appended to today's row)
+    # ------------------------------------------------------------------
+    hormonal_features = run_hormonal(period_start=period_start, cycle_length=cycle_length)
+    for k, v in hormonal_features.items():
+        df_new[k] = v
+    if period_start is not None:
+        logger.info("pipeline=bfe hormonal=active cycle_day=%d", int(hormonal_features["cycle_day"]))
 
     # ------------------------------------------------------------------
     # 2. Build / pad history

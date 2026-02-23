@@ -24,7 +24,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from pipeline import run_pipeline, setup_logging
-from store import MoodStore, score_to_colour, score_to_label, mood_label_to_score
+from store import MoodStore, WeatherStore, CycleStore, score_to_colour, score_to_label, mood_label_to_score
+from nodes.node_environmental import run as run_environmental
+from nodes.node_hormonal import run as run_hormonal
 
 # ---------------------------------------------------------------------------
 # App init
@@ -105,6 +107,34 @@ class MoodLogResponse(BaseModel):
     date: str
     mood_label: str
     mood_score: float
+
+
+class WeatherLogRequest(BaseModel):
+    lat: float = Field(..., description="Latitude from device location")
+    lon: float = Field(..., description="Longitude from device location")
+    log_date: Optional[str] = None
+
+
+class WeatherLogResponse(BaseModel):
+    success: bool
+    date: str
+    temperature_c: float
+    is_sunny: bool
+    uv_index: float
+    daylight_hours: float
+
+
+class CycleLogRequest(BaseModel):
+    period_start: str = Field(..., examples=["2026-02-10"], description="ISO date of period start")
+    cycle_length: int = Field(default=28, ge=21, le=45)
+
+
+class CycleLogResponse(BaseModel):
+    success: bool
+    period_start: str
+    cycle_length: int
+    current_phase: str
+    cycle_day: int
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +326,63 @@ def get_rhythm(user_id: str, year: int = 0, month: int = 0):
             )
 
     return RhythmResponse(user_id=user_id, month=month_str, history=history)
+
+
+@app.post("/weather/{user_id}", response_model=WeatherLogResponse)
+def log_weather(user_id: str, body: WeatherLogRequest):
+    """Fetch and store weather for the user's location.
+
+    Called by the iOS app on launch with CoreLocation lat/lng.
+    Automatically fetches from Open-Meteo — no user input needed.
+    """
+    log_date = date.today()
+    if body.log_date:
+        try:
+            log_date = date.fromisoformat(body.log_date)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="log_date must be YYYY-MM-DD")
+
+    features = run_environmental(lat=body.lat, lon=body.lon, log_date=log_date)
+    WeatherStore(user_id).append_weather(features, lat=body.lat, lon=body.lon, log_date=log_date)
+
+    return WeatherLogResponse(
+        success=True,
+        date=str(log_date),
+        temperature_c=features["temperature_c"],
+        is_sunny=bool(features["is_sunny"]),
+        uv_index=features["uv_index"],
+        daylight_hours=features["daylight_hours"],
+    )
+
+
+@app.post("/cycle/{user_id}", response_model=CycleLogResponse)
+def log_cycle(user_id: str, body: CycleLogRequest):
+    """Log a period start date (Flo-style cycle tracking).
+
+    Called when the user marks a period start in the app.
+    System auto-calculates current phase and injects it into the forecast.
+    """
+    try:
+        period_start = date.fromisoformat(body.period_start)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="period_start must be YYYY-MM-DD")
+
+    CycleStore(user_id).log_period(period_start, cycle_length=body.cycle_length)
+    phase_features = run_hormonal(period_start=period_start, cycle_length=body.cycle_length)
+
+    phase = next(
+        (k.replace("phase_", "") for k in phase_features
+         if k.startswith("phase_") and phase_features[k] == 1.0),
+        "luteal",
+    )
+
+    return CycleLogResponse(
+        success=True,
+        period_start=str(period_start),
+        cycle_length=body.cycle_length,
+        current_phase=phase,
+        cycle_day=int(phase_features["cycle_day"]),
+    )
 
 
 @app.get("/", include_in_schema=False)
