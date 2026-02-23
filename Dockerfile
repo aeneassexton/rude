@@ -21,6 +21,9 @@ ENV HEALTH_API_KEY=""
 ENV LOG_LEVEL=INFO
 ENV CORS_ORIGINS="*"
 ENV PORT=8000
+# Set these in Railway dashboard → Variables (never hardcode here):
+# SUPABASE_URL=https://xxxx.supabase.co
+# SUPABASE_SERVICE_KEY=your-service-role-secret-key
 
 EXPOSE 8000
 

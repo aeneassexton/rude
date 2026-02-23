@@ -1,12 +1,34 @@
-"""Simple file-backed mood history store.
+"""Mood history store with automatic Supabase / parquet backend selection.
 
-Persists daily mood logs as a parquet file under data/.
-Provides the history_df that the BFE pipeline needs.
+Backend is chosen at import time:
+  - If SUPABASE_URL and SUPABASE_SERVICE_KEY are set → Supabase (production)
+  - Otherwise → local parquet files under data/ (local dev / testing)
 
-In production, swap this for a Supabase / Postgres adapter
-by replacing MoodStore.load() and MoodStore.append().
+Required Supabase tables (run once in SQL Editor):
+
+    CREATE TABLE IF NOT EXISTS mood_logs (
+      id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id text NOT NULL,
+      date date NOT NULL,
+      mood_label text NOT NULL,
+      mood_score float NOT NULL,
+      created_at timestamptz DEFAULT now(),
+      UNIQUE(user_id, date)
+    );
+
+    CREATE TABLE IF NOT EXISTS feature_history (
+      id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id text NOT NULL,
+      date date NOT NULL,
+      sleep_hours float, hrv float, resting_hr float,
+      steps float, workouts float, vo2_max float,
+      mindfulness_minutes float,
+      created_at timestamptz DEFAULT now(),
+      UNIQUE(user_id, date)
+    );
 """
 import logging
+import os
 from datetime import date
 from pathlib import Path
 
@@ -14,11 +36,9 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
-
-# Mood labels from the UI mapped to a numeric score on a 1–10 scale.
-# Extend this dict as new mood states are added in Lovable.
+# ---------------------------------------------------------------------------
+# Mood label ↔ score mappings (shared by both backends)
+# ---------------------------------------------------------------------------
 MOOD_LABEL_TO_SCORE: dict[str, float] = {
     "radiant": 9.0,
     "energised": 8.0,
@@ -54,44 +74,159 @@ def score_to_label(score: float) -> str:
     return closest.capitalize()
 
 
+# ---------------------------------------------------------------------------
+# Backend detection
+# ---------------------------------------------------------------------------
+_SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+_SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+_USE_SUPABASE = bool(_SUPABASE_URL and _SUPABASE_KEY)
+
+if _USE_SUPABASE:
+    from supabase import create_client, Client as SupabaseClient
+    _sb: SupabaseClient = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+    logger.info("store backend=supabase url=%s", _SUPABASE_URL)
+else:
+    _sb = None  # type: ignore[assignment]
+    logger.info("store backend=parquet (set SUPABASE_URL + SUPABASE_SERVICE_KEY for production)")
+
+# ---------------------------------------------------------------------------
+# Parquet fallback paths
+# ---------------------------------------------------------------------------
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# MoodStore
+# ---------------------------------------------------------------------------
 class MoodStore:
-    """Per-user mood log backed by a parquet file."""
+    """Per-user mood log. Automatically uses Supabase or local parquet."""
 
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
-        self._path = DATA_DIR / f"mood_{user_id}.parquet"
-        self._history_path = DATA_DIR / f"history_{user_id}.parquet"
+        self._mood_path = DATA_DIR / f"mood_{user_id}.parquet"
+        self._feat_path = DATA_DIR / f"history_{user_id}.parquet"
 
     # ------------------------------------------------------------------
-    # Mood log (user-facing: label + date)
+    # Mood log
     # ------------------------------------------------------------------
     def load_mood_log(self) -> pd.DataFrame:
-        if self._path.exists():
-            return pd.read_parquet(self._path)
-        return pd.DataFrame(columns=["date", "mood_label", "mood_score"])
+        if _USE_SUPABASE:
+            return self._sb_load_mood_log()
+        return self._parquet_load_mood_log()
 
     def append_mood(self, mood_label: str, log_date: date | None = None) -> None:
         log_date = log_date or date.today()
         score = mood_label_to_score(mood_label)
+        if _USE_SUPABASE:
+            self._sb_append_mood(mood_label, log_date, score)
+        else:
+            self._parquet_append_mood(mood_label, log_date, score)
+        logger.info(
+            "store backend=%s user=%s date=%s mood=%s score=%.1f",
+            "supabase" if _USE_SUPABASE else "parquet",
+            self.user_id, log_date, mood_label, score,
+        )
+
+    # ------------------------------------------------------------------
+    # Feature history
+    # ------------------------------------------------------------------
+    def load_feature_history(self) -> pd.DataFrame:
+        if _USE_SUPABASE:
+            return self._sb_load_features()
+        return self._parquet_load_features()
+
+    def append_features(self, features: dict) -> None:
+        if _USE_SUPABASE:
+            self._sb_append_features(features)
+        else:
+            self._parquet_append_features(features)
+
+    # ------------------------------------------------------------------
+    # Supabase implementations
+    # ------------------------------------------------------------------
+    def _sb_load_mood_log(self) -> pd.DataFrame:
+        try:
+            resp = (
+                _sb.table("mood_logs")
+                .select("date, mood_label, mood_score")
+                .eq("user_id", self.user_id)
+                .order("date")
+                .execute()
+            )
+            if resp.data:
+                return pd.DataFrame(resp.data)
+            return pd.DataFrame(columns=["date", "mood_label", "mood_score"])
+        except Exception as exc:
+            logger.error("supabase load_mood_log failed user=%s: %s", self.user_id, exc)
+            return pd.DataFrame(columns=["date", "mood_label", "mood_score"])
+
+    def _sb_append_mood(self, mood_label: str, log_date: date, score: float) -> None:
+        try:
+            _sb.table("mood_logs").upsert(
+                {
+                    "user_id": self.user_id,
+                    "date": str(log_date),
+                    "mood_label": mood_label.lower(),
+                    "mood_score": score,
+                },
+                on_conflict="user_id,date",
+            ).execute()
+        except Exception as exc:
+            logger.error("supabase append_mood failed user=%s: %s", self.user_id, exc)
+            raise
+
+    def _sb_load_features(self) -> pd.DataFrame:
+        _FEAT_COLS = [
+            "date", "sleep_hours", "hrv", "resting_hr",
+            "steps", "workouts", "vo2_max", "mindfulness_minutes",
+        ]
+        try:
+            resp = (
+                _sb.table("feature_history")
+                .select(", ".join(_FEAT_COLS))
+                .eq("user_id", self.user_id)
+                .order("date")
+                .execute()
+            )
+            if resp.data:
+                return pd.DataFrame(resp.data).drop(columns=["date"], errors="ignore")
+            return pd.DataFrame()
+        except Exception as exc:
+            logger.error("supabase load_features failed user=%s: %s", self.user_id, exc)
+            return pd.DataFrame()
+
+    def _sb_append_features(self, features: dict) -> None:
+        try:
+            payload = {"user_id": self.user_id, "date": str(date.today()), **features}
+            _sb.table("feature_history").upsert(
+                payload, on_conflict="user_id,date"
+            ).execute()
+        except Exception as exc:
+            logger.error("supabase append_features failed user=%s: %s", self.user_id, exc)
+
+    # ------------------------------------------------------------------
+    # Parquet implementations (local dev fallback)
+    # ------------------------------------------------------------------
+    def _parquet_load_mood_log(self) -> pd.DataFrame:
+        if self._mood_path.exists():
+            return pd.read_parquet(self._mood_path)
+        return pd.DataFrame(columns=["date", "mood_label", "mood_score"])
+
+    def _parquet_append_mood(self, mood_label: str, log_date: date, score: float) -> None:
         new_row = pd.DataFrame(
             [{"date": str(log_date), "mood_label": mood_label.lower(), "mood_score": score}]
         )
-        df = self.load_mood_log()
-        df = pd.concat([df, new_row], ignore_index=True)
+        df = pd.concat([self._parquet_load_mood_log(), new_row], ignore_index=True)
         df = df.drop_duplicates(subset=["date"], keep="last")
-        df.to_parquet(self._path, index=False)
-        logger.info("store user=%s date=%s mood=%s score=%.1f", self.user_id, log_date, mood_label, score)
+        df.to_parquet(self._mood_path, index=False)
 
-    # ------------------------------------------------------------------
-    # Physiological feature history (BFE pipeline input)
-    # ------------------------------------------------------------------
-    def load_feature_history(self) -> pd.DataFrame:
-        if self._history_path.exists():
-            return pd.read_parquet(self._history_path)
+    def _parquet_load_features(self) -> pd.DataFrame:
+        if self._feat_path.exists():
+            return pd.read_parquet(self._feat_path)
         return pd.DataFrame()
 
-    def append_features(self, features: dict) -> None:
+    def _parquet_append_features(self, features: dict) -> None:
         new_row = pd.DataFrame([features])
-        df = self.load_feature_history()
-        df = pd.concat([df, new_row], ignore_index=True)
-        df.to_parquet(self._history_path, index=False)
+        df = pd.concat([self._parquet_load_features(), new_row], ignore_index=True)
+        df.to_parquet(self._feat_path, index=False)
