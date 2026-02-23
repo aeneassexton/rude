@@ -308,3 +308,16 @@ def root():
 def health():
     """Liveness probe — used by Render/Railway/Fly.io."""
     return {"status": "ok"}
+
+
+@app.get("/status")
+def status():
+    """Shows which storage backend is active. Safe to call — no secrets exposed."""
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    backend = "supabase" if (supabase_url and supabase_key) else "parquet (no Supabase env vars)"
+    return {
+        "backend": backend,
+        "supabase_url_set": bool(supabase_url),
+        "supabase_key_set": bool(supabase_key),
+    }
