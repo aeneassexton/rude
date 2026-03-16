@@ -1,173 +1,215 @@
-.ci-screen {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  position: relative;
+import './CheckInScreen.css'
+import { useState, useRef, useEffect } from 'react'
+
+const MOODS = [
+  { label: 'Radiant', color: '#4ade80', glow: '#4ade8050' },
+  { label: 'Steady',  color: '#4a9eff', glow: '#4a9eff50' },
+  { label: 'Tired',   color: '#e8714a', glow: '#e8714a50' },
+  { label: 'Heavy',   color: '#818cf8', glow: '#818cf850' },
+]
+
+const STEP = 360 / MOODS.length
+const MAX_ROT = 340
+
+function haptic(style = 'light') {
+  if (navigator?.vibrate) navigator.vibrate(style === 'light' ? 8 : 18)
 }
 
-/* Nav */
-.ci-nav {
-  display: flex;
-  justify-content: space-between;
-  padding: 16px 24px 0;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 10;
-}
+export default function CheckInScreen({ api, userId, onForecast, onInsights }) {
+  const [selected, setSelected]   = useState(null)
+  const [rotation, setRotation]   = useState(0)
+  const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState(null)
+  const dragging    = useRef(false)
+  const lastAngle   = useRef(0)
+  const velocity    = useRef(0)
+  const lastTime    = useRef(0)
+  const animFrame   = useRef(null)
+  const rotRef      = useRef(0)
+  const lastSnapped = useRef(null)
+  const wheelRef    = useRef(null)
 
-.nav-pill {
-  padding: 10px 22px;
-  border-radius: 999px;
-  border: 1px solid;
-  background: rgba(255,255,255,0.04);
-  font-family: 'DM Sans', sans-serif;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  -webkit-app-region: no-drag;
-}
-.nav-pill:hover { background: rgba(255,255,255,0.09); }
-.nav-pill.blue   { color: #4a9eff; border-color: rgba(74,158,255,0.35); }
-.nav-pill.orange { color: #e8714a; border-color: rgba(232,113,74,0.35); }
+  useEffect(() => {
+    fetch(`${api}/rhythm/${userId}?year=${new Date().getFullYear()}&month=${new Date().getMonth()+1}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.history?.length > 0) {
+          const last  = data.history[data.history.length - 1]
+          const match = MOODS.find(m => m.label.toLowerCase() === last.mood_label.toLowerCase())
+          if (match) {
+            const idx = MOODS.indexOf(match)
+            const targetRot = idx * STEP
+            rotRef.current = targetRot
+            setRotation(targetRot)
+            setSelected(match)
+          }
+        }
+      }).catch(() => {})
+  }, [])
 
-/* Heading */
-.ci-heading {
-  padding: 40px 28px 0;
-  position: relative;
-  z-index: 10;
-}
+  function getAngle(e) {
+    const el   = wheelRef.current
+    const rect = el.getBoundingClientRect()
+    const cx   = rect.left + rect.width  / 2
+    const cy   = rect.top  + rect.height / 2
+    const px   = e.touches ? e.touches[0].clientX : e.clientX
+    const py   = e.touches ? e.touches[0].clientY : e.clientY
+    return Math.atan2(py - cy, px - cx) * (180 / Math.PI)
+  }
 
-.ci-title {
-  font-size: clamp(2.2rem, 7vw, 3rem);
-  font-weight: 300;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
-}
+  function onDown(e) {
+    cancelAnimationFrame(animFrame.current)
+    dragging.current  = true
+    velocity.current  = 0
+    lastAngle.current = getAngle(e)
+    lastTime.current  = performance.now()
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
 
-.ci-sub {
-  margin-top: 10px;
-  font-size: 13px;
-  color: var(--text-muted);
-  letter-spacing: 0.03em;
-}
+  function onMove(e) {
+    if (!dragging.current) return
+    const now = performance.now()
+    const a   = getAngle(e)
+    let delta = a - lastAngle.current
+    if (delta >  180) delta -= 360
+    if (delta < -180) delta += 360
+    const dt = now - lastTime.current || 1
+    velocity.current  = delta / dt
+    lastAngle.current = a
+    lastTime.current  = now
+    const next = Math.max(-MAX_ROT / 2, Math.min(MAX_ROT / 2, rotRef.current + delta))
+    rotRef.current = next
+    setRotation(next)
+    const norm    = ((next % 360) + 360) % 360
+    const snapIdx = Math.round(norm / STEP) % MOODS.length
+    if (lastSnapped.current !== snapIdx) {
+      lastSnapped.current = snapIdx
+      haptic('light')
+    }
+  }
 
-/* Wheel */
-.wheel-anchor {
-  position: absolute;
-  bottom: 15%;
-  right: -22%;
-  width: 75vw;
-  max-width: 400px;
-  aspect-ratio: 1;
-  z-index: 5;
-}
+  function onUp() {
+    if (!dragging.current) return
+    dragging.current = false
+    coast()
+  }
 
-.wheel-ring {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.07);
-  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.015) 0%, transparent 65%);
-  position: relative;
-  cursor: grab;
-  touch-action: none;
-  -webkit-app-region: no-drag;
-  will-change: transform;
-}
-.wheel-ring:active { cursor: grabbing; }
+  function coast() {
+    const decelerate = () => {
+      velocity.current *= 0.88
+      if (Math.abs(velocity.current) > 0.05) {
+        const next = Math.max(-MAX_ROT / 2, Math.min(MAX_ROT / 2, rotRef.current + velocity.current * 16))
+        rotRef.current = next
+        setRotation(next)
+        animFrame.current = requestAnimationFrame(decelerate)
+      } else {
+        snapToNearest()
+      }
+    }
+    animFrame.current = requestAnimationFrame(decelerate)
+  }
 
-/* Mood nodes */
-.mn {
-  position: absolute;
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: var(--bg-card);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06), inset 0 0 22px var(--mg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: box-shadow 0.2s ease, background 0.2s ease;
-  -webkit-app-region: no-drag;
-}
+  function snapToNearest() {
+    const start    = rotRef.current
+    const target   = Math.round(rotRef.current / STEP) * STEP
+    const startT   = performance.now()
+    const duration = 180
+    const norm     = ((target % 360) + 360) % 360
+    const idx      = Math.round(norm / STEP) % MOODS.length
+    const animate  = (now) => {
+      const t    = Math.min((now - startT) / duration, 1)
+      const ease = 1 - Math.pow(1 - t, 3)
+      const cur  = start + (target - start) * ease
+      rotRef.current = cur
+      setRotation(cur)
+      if (t < 1) {
+        animFrame.current = requestAnimationFrame(animate)
+      } else {
+        rotRef.current = target
+        setRotation(target)
+        haptic('medium')
+        const mood = MOODS[idx]
+        setSelected(mood)
+        logMood(mood)
+      }
+    }
+    animFrame.current = requestAnimationFrame(animate)
+  }
 
-.mn-on {
-  box-shadow: 0 0 0 1.5px var(--mc), 0 0 32px var(--mg), inset 0 0 24px var(--mg);
-  background: color-mix(in srgb, var(--mc) 15%, #141b24);
-}
+  async function logMood(mood) {
+    if (!mood) return
+    setLoading(true); setError(null)
+    try {
+      const res = await fetch(`${api}/mood/${userId}`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ mood_label: mood.label })
+      })
+      if (!res.ok) throw new Error()
+      setSubmitted(true)
+    } catch { setError('Could not reach backend.') }
+    finally { setLoading(false) }
+  }
 
-.mn-word {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 13px;
-  font-weight: 400;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
+  if (submitted && selected) return (
+    <div className="ci-done" onClick={() => setSubmitted(false)}>
+      <div className="done-orb" style={{ background: selected.glow, boxShadow: `0 0 120px ${selected.color}40` }} />
+      <h2 className="serif done-word" style={{ color: selected.color }}>{selected.label}</h2>
+      <p className="done-sub">logged for today</p>
+      <p className="done-tap">tap anywhere to continue</p>
+    </div>
+  )
 
-/* Hub */
-.wheel-hub {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 56px; height: 56px;
-  border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: #0d1117;
-  pointer-events: none;
+  return (
+    <div className="ci-screen">
+      <div className="ci-nav">
+        <button className="nav-pill blue"   onClick={onForecast}>Forecast +</button>
+        <button className="nav-pill orange" onClick={onInsights}>Insights ›</button>
+      </div>
+      <div className="ci-heading">
+        <h1 className="serif ci-title">
+          {selected ? `Feeling ${selected.label}` : 'How are you feeling?'}
+        </h1>
+        <p className="ci-sub">tap how you feel</p>
+      </div>
+      <div className="wheel-anchor">
+        <div
+          className="wheel-ring"
+          ref={wheelRef}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+          style={{ transform: `rotate(${rotation}deg)` }}
+        >
+          {MOODS.map((mood, i) => {
+            const deg = (i / MOODS.length) * 360
+            const rad = (deg - 90) * (Math.PI / 180)
+            const R   = 38
+            const x   = 50 + R * Math.cos(rad)
+            const y   = 50 + R * Math.sin(rad)
+            return (
+              <div
+                key={mood.label}
+                className={`mn ${selected?.label === mood.label ? 'mn-on' : ''}`}
+                style={{
+                  left: `${x}%`, top: `${y}%`,
+                  '--mc': mood.color, '--mg': mood.glow,
+                  transform: `translate(-50%,-50%) rotate(${-rotation}deg)`,
+                }}
+              >
+                {selected?.label === mood.label
+                  ? <span className="mn-word" style={{ color: mood.color }}>{mood.label}</span>
+                  : null}
+              </div>
+            )
+          })}
+          <div className="wheel-hub" />
+        </div>
+      </div>
+      {loading && <p className="ci-loading">Saving…</p>}
+      {error   && <p className="ci-err">{error}</p>}
+    </div>
+  )
 }
-
-.ci-loading {
-  position: absolute;
-  bottom: 28%;
-  left: 28px;
-  color: var(--text-muted);
-  font-size: 13px;
-  z-index: 20;
-}
-
-.ci-err {
-  position: absolute;
-  bottom: 20px; left: 50%;
-  transform: translateX(-50%);
-  color: #f87171;
-  font-size: 12px;
-  z-index: 20;
-}
-
-/* Done state — full screen tap target */
-.ci-done {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.done-orb {
-  width: 180px; height: 180px;
-  border-radius: 50%;
-  margin-bottom: 16px;
-  animation: orb-in 0.55s cubic-bezier(0.34,1.56,0.64,1) both;
-}
-@keyframes orb-in {
-  from { transform: scale(0.3); opacity: 0; }
-  to   { transform: scale(1);   opacity: 1; }
-}
-
-.done-word { font-size: 3rem; font-weight: 300; letter-spacing: -0.02em; }
-.done-sub  { font-size: 13px; color: var(--text-muted); letter-spacing: 0.05em; }
-.done-tap  {
-  margin-top: 8px;
-  font-size: 11px;
-  color: #3d4f63;
-  letter-spacing: 0.06em;
-  animation: fade-in 1s ease 0.8s both;
-}
-@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }

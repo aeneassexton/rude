@@ -57,10 +57,10 @@
 /* Wheel — anchored bottom-right, ~25% off screen */
 .wheel-anchor {
   position: absolute;
-  bottom: 15%;
+  bottom: -18%;
   right: -22%;
-  width: 75vw;
-  max-width: 400px;
+  width: 85vw;
+  max-width: 420px;
   aspect-ratio: 1;
   z-index: 5;
 }
