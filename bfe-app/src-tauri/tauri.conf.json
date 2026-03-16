@@ -1,0 +1,35 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist"
+  },
+  "package": { "productName": "BFE", "version": "0.1.0" },
+  "tauri": {
+    "allowlist": {
+      "all": true
+    },
+    "bundle": {
+      "active": true,
+      "identifier": "com.bfe.app",
+      "icon": ["icons/icon.png"],
+      "macOS": {
+        "entitlements": null,
+        "frameworks": [],
+        "signingIdentity": null
+      }
+    },
+    "security": { "csp": null },
+    "windows": [{
+      "title": "BFE",
+      "width": 390,
+      "height": 844,
+      "resizable": true,
+      "fullscreen": false,
+      "center": true,
+      "decorations": true,
+      "transparent": false
+    }]
+  }
+}

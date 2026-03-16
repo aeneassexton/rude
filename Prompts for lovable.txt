@@ -1,0 +1,25 @@
+Prompts for lovable
+
+
+"Update the UI design with the following layout and styling changes:
+
+Wheel Repositioning: Move the main interactive mood wheel to the lower-middle right of the screen. I want it to be about a quarter (25%) submerged/hidden off the right edge of the screen, so it looks like it's anchored to the side.
+
+Sleeker, Darker Theme: Darken the overall app background. Move away from the lighter/airy gradients and use a much deeper, richer dark theme (like a deep midnight blue or pure dark mode) to make it look premium and sleek.
+
+Ground the 'Forecast' View: Make the Forecast section look less 'airy' and floating. Reduce some of the excessive empty space. Use solid, slightly darker card backgrounds with very subtle borders or a tight glassmorphism effect to make the data and text feel more grounded and structured."
+
+Regarding: external forecasts
+"At the bottom of the 'Forecast' scroll view, just below the existing 'Pattern' and 'Trend' cards, add a new collapsible accordion tab titled 'Externally Impacted Forecasts'. Make it look like a sleek, dark-themed button or closed card. When clicked, it should smoothly expand to reveal a structured breakdown of external influences. To keep the UI clean, organize the expanded data into small, grounded sub-cards or simple rows with subtle icons, grouped by these categories:
+
+🌦 Environment: (Sunlight hours, AQI, Temperature, Weather)
+
+👥 Social & Schedule: (Calendar density, Social battery trends, Group vs Solo context)
+
+🍎 Lifestyle: (Caffeine/Alcohol intake, Meal timing, Sleep environment)
+
+🏃 Activity & Flow: (Light exposure, Outdoor movement, Mindfulness)
+
+❤️ Relational: (Shared mood windows, Partner overlap)
+
+Keep the styling consistent with the new dark, premium theme—use deep backgrounds with very subtle borders. Use minimal text and rely on clean typography and icons so the expanded view feels insightful, not cluttered."

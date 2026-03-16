@@ -1,0 +1,56 @@
+.rh-screen { padding: 0 20px 40px; display: flex; flex-direction: column; gap: 16px; min-height: 100vh; }
+.rh-nav { display: flex; justify-content: space-between; padding: 16px 0 0; }
+.rh-title { font-size: 2.4rem; font-weight: 300; letter-spacing: -0.01em; }
+.rh-month { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; color: #6b7a8d; text-transform: uppercase; margin-top: -8px; }
+
+/* Calendar */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.cal-hd { text-align: center; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #3d4f63; padding: 4px 0 8px; }
+
+.cal-cell {
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: #141b24;
+  border: 1px solid rgba(255,255,255,0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.cal-cell.empty { background: transparent; border-color: transparent; }
+
+.cal-cell.is-today {
+  border-color: #4a9eff;
+  box-shadow: 0 0 0 1px #4a9eff20;
+}
+
+.cal-cell.has-log {
+  background: color-mix(in srgb, var(--cc) 10%, #141b24);
+  border-color: color-mix(in srgb, var(--cc) 25%, transparent);
+}
+
+.cal-num { font-size: 13px; color: #6b7a8d; font-weight: 400; line-height: 1; }
+.cal-cell.is-today .cal-num { color: #4a9eff; font-weight: 600; }
+
+.cal-dot { width: 5px; height: 5px; border-radius: 50%; }
+
+/* Legend */
+.rh-legend { display: flex; gap: 18px; flex-wrap: wrap; }
+.leg-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7a8d; text-transform: capitalize; }
+.leg-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* Recent */
+.recent { background: #141b24; border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.recent-hd { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7a8d; }
+.recent-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.recent-date { color: #3d4f63; font-size: 12px; }
+.recent-mood { font-weight: 500; text-transform: capitalize; }
+.recent-score { color: #3d4f63; font-size: 12px; }
+
+.rh-loading { display: flex; align-items: center; justify-content: center; flex: 1; }
+.rh-pulse { width: 44px; height: 44px; border-radius: 50%; border: 1px solid #4a9eff; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{transform:scale(1);opacity:0.5;}50%{transform:scale(1.3);opacity:1;} }
