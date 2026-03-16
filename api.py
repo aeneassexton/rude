@@ -16,6 +16,7 @@ import logging
 import os
 from datetime import date, timedelta
 from typing import Optional
+from auth import get_current_user, require_self
 
 import numpy as np
 from fastapi import FastAPI, HTTPException

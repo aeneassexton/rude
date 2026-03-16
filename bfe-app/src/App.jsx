@@ -4,7 +4,7 @@ import ForecastScreen from './components/ForecastScreen'
 import RhythmScreen from './components/RhythmScreen'
 import './index.css'
 
-const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+const API = 'http://127.0.0.1:8000'
 const USER_ID = 'local_user'
 
 export default function App() {

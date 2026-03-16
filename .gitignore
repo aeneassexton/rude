@@ -7,3 +7,6 @@ data/
 *.parquet
 .DS_Store
 .env
+bfe-app/src-tauri/target/
+.vercel
+.env*.local
