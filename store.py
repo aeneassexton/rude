@@ -82,12 +82,16 @@ _SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 _USE_SUPABASE = bool(_SUPABASE_URL and _SUPABASE_KEY)
 
 if _USE_SUPABASE:
-    from supabase import create_client, Client as SupabaseClient
-    _sb: SupabaseClient = create_client(_SUPABASE_URL, _SUPABASE_KEY)
-    logger.info("store backend=supabase url=%s", _SUPABASE_URL)
+    try:
+        from supabase import create_client, Client as SupabaseClient
+        _sb: SupabaseClient = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+        logger.info("store backend=supabase url=%s", _SUPABASE_URL)
+    except Exception as exc:
+        logger.warning("store supabase init failed: %s — falling back to parquet", exc)
+        _sb = None
 else:
-    _sb = None  # type: ignore[assignment]
-    logger.info("store backend=parquet (set SUPABASE_URL + SUPABASE_SERVICE_KEY for production)")
+    _sb = None
+    logger.info("store backend=parquet ...")
 
 # ---------------------------------------------------------------------------
 # Parquet fallback paths
