@@ -13,7 +13,6 @@ import logging
 
 import numpy as np
 import pandas as pd
-import pymc as pm
 
 from lovable import InsufficientCreditsError, use_credits
 
@@ -28,6 +27,7 @@ def bayesian_personalization(
     method: str = "map",
     random_seed: int = 42,
 ) -> tuple[np.ndarray, float]:
+    import pymc as pm
     """Estimate personalised weights and intercept for mood prediction.
 
     Args:
