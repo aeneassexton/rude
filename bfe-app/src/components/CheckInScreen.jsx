@@ -1,4 +1,3 @@
-import { useState, useRef } from 'react'
 import './CheckInScreen.css'
 import { useState, useRef, useEffect } from 'react'
 
