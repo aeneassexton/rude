@@ -9,14 +9,14 @@
 
 .cal-cell {
   aspect-ratio: 1;
-  border-radius: 12px;
+  border-radius: 50%;       /* CIRCULAR */
   background: #141b24;
   border: 1px solid rgba(255,255,255,0.05);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   position: relative;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -25,18 +25,21 @@
 
 .cal-cell.is-today {
   border-color: #4a9eff;
-  box-shadow: 0 0 0 1px #4a9eff20;
+  box-shadow: 0 0 0 1px #4a9eff20, 0 0 8px #4a9eff18;
 }
 
 .cal-cell.has-log {
-  background: color-mix(in srgb, var(--cc) 10%, #141b24);
-  border-color: color-mix(in srgb, var(--cc) 25%, transparent);
+  background: color-mix(in srgb, var(--cc) 14%, #141b24);
+  border-color: color-mix(in srgb, var(--cc) 35%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--cc) 12%, transparent);
 }
 
-.cal-num { font-size: 13px; color: #6b7a8d; font-weight: 400; line-height: 1; }
+.cal-num { font-size: 12px; color: #6b7a8d; font-weight: 400; line-height: 1; }
 .cal-cell.is-today .cal-num { color: #4a9eff; font-weight: 600; }
+.cal-cell.has-log .cal-num  { color: var(--cc); }
 
-.cal-dot { width: 5px; height: 5px; border-radius: 50%; }
+/* Dot hidden inside circular cell — redundant, keep tiny */
+.cal-dot { width: 4px; height: 4px; border-radius: 50%; opacity: 0.7; }
 
 /* Legend */
 .rh-legend { display: flex; gap: 18px; flex-wrap: wrap; }

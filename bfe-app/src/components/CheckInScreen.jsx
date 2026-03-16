@@ -1,154 +1,173 @@
-import './CheckInScreen.css'
-import { useState, useRef, useEffect } from 'react'
-
-const MOODS = [
-  { label: 'Radiant', color: '#4ade80', glow: '#4ade8050' },
-  { label: 'Steady',  color: '#4a9eff', glow: '#4a9eff50' },
-  { label: 'Tired',   color: '#e8714a', glow: '#e8714a50' },
-  { label: 'Heavy',   color: '#818cf8', glow: '#818cf850' },
-]
-
-export default function CheckInScreen({ api, userId, onForecast, onInsights }) {
-  const [selected, setSelected]   = useState(null)
-  const [rotation, setRotation]   = useState(0)
-  const [submitted, setSubmitted] = useState(false)
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState(null)
-  const dragging  = useRef(false)
-  const lastAngle = useRef(0)
-  const wheelRef  = useRef(null)
-  useEffect(() => {
-    fetch(`${api}/rhythm/${userId}?year=${new Date().getFullYear()}&month=${new Date().getMonth()+1}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.history?.length > 0) {
-          const last = data.history[data.history.length - 1]
-          const match = MOODS.find(m => m.label.toLowerCase() === last.mood_label.toLowerCase())
-          if (match) setSelected(match)
-        }
-      }).catch(() => {})
-  }, [])
-
-  function centerAngle(e) {
-    const el   = wheelRef.current
-    const rect = el.getBoundingClientRect()
-    const cx   = rect.left + rect.width  / 2
-    const cy   = rect.top  + rect.height / 2
-    const px   = e.touches ? e.touches[0].clientX : e.clientX
-    const py   = e.touches ? e.touches[0].clientY : e.clientY
-    return Math.atan2(py - cy, px - cx) * (180 / Math.PI)
-  }
-
-  function onDown(e) {
-    dragging.current  = true
-    lastAngle.current = centerAngle(e)
-    e.currentTarget.setPointerCapture(e.pointerId)
-  }
-
-  function onMove(e) {
-    if (!dragging.current) return
-    const a     = centerAngle(e)
-    const delta = a - lastAngle.current
-    lastAngle.current = a
-    setRotation(r => Math.max(-135, Math.min(135, r + delta)))
-  }
-
-  function onUp() {
-    if (!dragging.current) return
-    dragging.current = false
-    const step       = 360 / MOODS.length
-    const snapped    = Math.round(rotation / step) * step
-    setRotation(snapped)
-    const norm       = ((snapped % 360) + 360) % 360
-    const idx        = ((Math.round(norm / step) % MOODS.length) + MOODS.length) % MOODS.length
-    const chosenMood = MOODS[idx]
-    setSelected(chosenMood)
-    logMood(chosenMood)
-  }
-
-  async function logMood(mood) {
-    if (!mood) return
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch(`${api}/mood/${userId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mood_label: mood.label })
-      })
-      if (!res.ok) throw new Error()
-      setSubmitted(true)
-    } catch {
-      setError('Could not reach backend.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (submitted && selected) return (
-    <div className="ci-done">
-      <div className="done-orb" style={{ background: selected.glow, boxShadow: `0 0 120px ${selected.color}40` }} />
-      <h2 className="serif done-word" style={{ color: selected.color }}>{selected.label}</h2>
-      <p className="done-sub">logged for today</p>
-      <button className="done-again" onClick={() => { setSubmitted(false); setSelected(null); setRotation(0) }}>
-        log again
-      </button>
-    </div>
-  )
-
-  return (
-    <div className="ci-screen">
-      <div className="ci-nav">
-        <button className="nav-pill blue"   onClick={onForecast}>Forecast +</button>
-        <button className="nav-pill orange" onClick={onInsights}>Insights ›</button>
-      </div>
-
-      <div className="ci-heading">
-        <h1 className="serif ci-title">
-          {selected ? `Feeling ${selected.label}` : 'How are you feeling?'}
-        </h1>
-      </div>
-
-      <div className="wheel-anchor">
-        <div
-          className="wheel-ring"
-          ref={wheelRef}
-          onPointerDown={onDown}
-          onPointerMove={onMove}
-          onPointerUp={onUp}
-          onPointerCancel={onUp}
-          style={{ transform: `rotate(${rotation}deg)` }}
-        >
-          {MOODS.map((mood, i) => {
-            const deg = (i / MOODS.length) * 360
-            const rad = (deg - 90) * (Math.PI / 180)
-            const R   = 38
-            const x   = 50 + R * Math.cos(rad)
-            const y   = 50 + R * Math.sin(rad)
-            return (
-              <div
-                key={mood.label}
-                className={`mn ${selected?.label === mood.label ? 'mn-on' : ''}`}
-                style={{
-                  left: `${x}%`, top: `${y}%`,
-                  '--mc': mood.color, '--mg': mood.glow,
-                  transform: `translate(-50%,-50%) rotate(${-rotation}deg)`,
-                }}
-                onClick={() => { setSelected(mood); logMood(mood) }}
-              >
-                {selected?.label === mood.label
-                  ? <span className="mn-word" style={{ color: mood.color }}>{mood.label}</span>
-                  : null
-                }
-              </div>
-            )
-          })}
-          <div className="wheel-hub" />
-        </div>
-      </div>
-
-      {loading && <p className="ci-loading">Saving...</p>}
-      {error   && <p className="ci-err">{error}</p>}
-    </div>
-  )
+.ci-screen {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
 }
+
+/* Nav */
+.ci-nav {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 24px 0;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+
+.nav-pill {
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 1px solid;
+  background: rgba(255,255,255,0.04);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  -webkit-app-region: no-drag;
+}
+.nav-pill:hover { background: rgba(255,255,255,0.09); }
+.nav-pill.blue   { color: #4a9eff; border-color: rgba(74,158,255,0.35); }
+.nav-pill.orange { color: #e8714a; border-color: rgba(232,113,74,0.35); }
+
+/* Heading */
+.ci-heading {
+  padding: 40px 28px 0;
+  position: relative;
+  z-index: 10;
+}
+
+.ci-title {
+  font-size: clamp(2.2rem, 7vw, 3rem);
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.ci-sub {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
+
+/* Wheel */
+.wheel-anchor {
+  position: absolute;
+  bottom: 15%;
+  right: -22%;
+  width: 75vw;
+  max-width: 400px;
+  aspect-ratio: 1;
+  z-index: 5;
+}
+
+.wheel-ring {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.015) 0%, transparent 65%);
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+  will-change: transform;
+}
+.wheel-ring:active { cursor: grabbing; }
+
+/* Mood nodes */
+.mn {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06), inset 0 0 22px var(--mg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+  -webkit-app-region: no-drag;
+}
+
+.mn-on {
+  box-shadow: 0 0 0 1.5px var(--mc), 0 0 32px var(--mg), inset 0 0 24px var(--mg);
+  background: color-mix(in srgb, var(--mc) 15%, #141b24);
+}
+
+.mn-word {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Hub */
+.wheel-hub {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: #0d1117;
+  pointer-events: none;
+}
+
+.ci-loading {
+  position: absolute;
+  bottom: 28%;
+  left: 28px;
+  color: var(--text-muted);
+  font-size: 13px;
+  z-index: 20;
+}
+
+.ci-err {
+  position: absolute;
+  bottom: 20px; left: 50%;
+  transform: translateX(-50%);
+  color: #f87171;
+  font-size: 12px;
+  z-index: 20;
+}
+
+/* Done state — full screen tap target */
+.ci-done {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.done-orb {
+  width: 180px; height: 180px;
+  border-radius: 50%;
+  margin-bottom: 16px;
+  animation: orb-in 0.55s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+@keyframes orb-in {
+  from { transform: scale(0.3); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+.done-word { font-size: 3rem; font-weight: 300; letter-spacing: -0.02em; }
+.done-sub  { font-size: 13px; color: var(--text-muted); letter-spacing: 0.05em; }
+.done-tap  {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #3d4f63;
+  letter-spacing: 0.06em;
+  animation: fade-in 1s ease 0.8s both;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
