@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react'
 import './CheckInScreen.css'
+import { useState, useRef, useEffect } from 'react'
 
 const MOODS = [
   { label: 'Radiant', color: '#4ade80', glow: '#4ade8050' },
@@ -8,59 +8,112 @@ const MOODS = [
   { label: 'Heavy',   color: '#818cf8', glow: '#818cf850' },
 ]
 
-export default function CheckInScreen({ api, userId, onForecast, onInsights }) {
+const STEP    = 360 / MOODS.length
+const MAX_ROT = 340
+
+function haptic(style = 'light') {
+  if (navigator?.vibrate) navigator.vibrate(style === 'light' ? 8 : 18)
+}
+
+export default function CheckInScreen({ api, userId, token, onForecast, onInsights }) {
   const [selected, setSelected]   = useState(null)
   const [rotation, setRotation]   = useState(0)
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
-  const dragging   = useRef(false)
-  const lastAngle  = useRef(0)
-  const wheelRef   = useRef(null)
+  const dragging    = useRef(false)
+  const lastAngle   = useRef(0)
+  const velocity    = useRef(0)
+  const lastTime    = useRef(0)
+  const animFrame   = useRef(null)
+  const rotRef      = useRef(0)
+  const lastSnapped = useRef(null)
+  const wheelRef    = useRef(null)
 
-  function centerAngle(e) {
-    const el   = wheelRef.current
-    const rect = el.getBoundingClientRect()
-    const cx   = rect.left + rect.width  / 2
-    const cy   = rect.top  + rect.height / 2
-    const px   = e.touches ? e.touches[0].clientX : e.clientX
-    const py   = e.touches ? e.touches[0].clientY : e.clientY
+  useEffect(() => {
+    fetch(
+      `${api}/rhythm/${userId}?year=${new Date().getFullYear()}&month=${new Date().getMonth()+1}`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    )
+      .then(r => r.json())
+      .then(data => {
+        if (data.history?.length > 0) {
+          const last  = data.history[data.history.length - 1]
+          const match = MOODS.find(m => m.label.toLowerCase() === last.mood_label.toLowerCase())
+          if (match) {
+            const idx = MOODS.indexOf(match)
+            rotRef.current = idx * STEP
+            setRotation(idx * STEP)
+            setSelected(match)
+          }
+        }
+      }).catch(() => {})
+  }, [])
+
+  function getAngle(e) {
+    const el = wheelRef.current, rect = el.getBoundingClientRect()
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2
+    const px = e.touches ? e.touches[0].clientX : e.clientX
+    const py = e.touches ? e.touches[0].clientY : e.clientY
     return Math.atan2(py - cy, px - cx) * (180 / Math.PI)
   }
 
   function onDown(e) {
-    dragging.current  = true
-    lastAngle.current = centerAngle(e)
+    cancelAnimationFrame(animFrame.current)
+    dragging.current = true; velocity.current = 0
+    lastAngle.current = getAngle(e); lastTime.current = performance.now()
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   function onMove(e) {
     if (!dragging.current) return
-    const a     = centerAngle(e)
-    const delta = a - lastAngle.current
-    lastAngle.current = a
-    setRotation(r => r + delta)
+    const now = performance.now(), a = getAngle(e)
+    let delta = a - lastAngle.current
+    if (delta > 180) delta -= 360; if (delta < -180) delta += 360
+    velocity.current = delta / (now - lastTime.current || 1)
+    lastAngle.current = a; lastTime.current = now
+    const next = Math.max(-MAX_ROT/2, Math.min(MAX_ROT/2, rotRef.current + delta))
+    rotRef.current = next; setRotation(next)
+    const snapIdx = Math.round(((next % 360) + 360) % 360 / STEP) % MOODS.length
+    if (lastSnapped.current !== snapIdx) { lastSnapped.current = snapIdx; haptic('light') }
   }
 
-  function onUp() {
-    if (!dragging.current) return
-    dragging.current = false
-    const step    = 360 / MOODS.length
-    const snapped = Math.round(rotation / step) * step
-    setRotation(snapped)
-    const norm = ((snapped % 360) + 360) % 360
-    const idx  = Math.round(norm / step) % MOODS.length
-    setSelected(MOODS[(MOODS.length - idx) % MOODS.length])
+  function onUp() { if (!dragging.current) return; dragging.current = false; coast() }
+
+  function coast() {
+    const dec = () => {
+      velocity.current *= 0.92
+      if (Math.abs(velocity.current) > 0.03) {
+        const next = Math.max(-MAX_ROT/2, Math.min(MAX_ROT/2, rotRef.current + velocity.current * 16))
+        rotRef.current = next; setRotation(next)
+        animFrame.current = requestAnimationFrame(dec)
+      } else snapToNearest()
+    }
+    animFrame.current = requestAnimationFrame(dec)
   }
 
-  async function handleLog() {
-    if (!selected) return
+  function snapToNearest() {
+    const start = rotRef.current, target = Math.round(rotRef.current / STEP) * STEP
+    const idx   = Math.round(((target % 360) + 360) % 360 / STEP) % MOODS.length
+    const startT = performance.now()
+    const animate = (now) => {
+      const t = Math.min((now - startT) / 220, 1)
+      const cur = start + (target - start) * (1 - Math.pow(1-t, 3))
+      rotRef.current = cur; setRotation(cur)
+      if (t < 1) { animFrame.current = requestAnimationFrame(animate) }
+      else { rotRef.current = target; setRotation(target); haptic('medium'); setSelected(MOODS[idx]); logMood(MOODS[idx]) }
+    }
+    animFrame.current = requestAnimationFrame(animate)
+  }
+
+  async function logMood(mood) {
+    if (!mood) return
     setLoading(true); setError(null)
     try {
       const res = await fetch(`${api}/mood/${userId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mood_label: selected.label })
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ mood_label: mood.label })
       })
       if (!res.ok) throw new Error()
       setSubmitted(true)
@@ -68,82 +121,45 @@ export default function CheckInScreen({ api, userId, onForecast, onInsights }) {
     finally { setLoading(false) }
   }
 
-  if (submitted) return (
-    <div className="ci-done">
+  if (submitted && selected) return (
+    <div className="ci-done" onClick={() => setSubmitted(false)}>
       <div className="done-orb" style={{ background: selected.glow, boxShadow: `0 0 120px ${selected.color}40` }} />
       <h2 className="serif done-word" style={{ color: selected.color }}>{selected.label}</h2>
       <p className="done-sub">logged for today</p>
-      <button className="done-again" onClick={() => { setSubmitted(false); setSelected(null); setRotation(0) }}>
-        log again
-      </button>
+      <p className="done-tap">tap anywhere to continue</p>
     </div>
   )
 
   return (
     <div className="ci-screen">
       <div className="ci-nav">
-        <button className="nav-pill blue"   onClick={onForecast}>Forecast +</button>
+        <button className="nav-pill blue" onClick={onForecast}>Forecast +</button>
         <button className="nav-pill orange" onClick={onInsights}>Insights ›</button>
       </div>
-
       <div className="ci-heading">
-        <h1 className="serif ci-title">
-          {selected ? `Feeling ${selected.label}` : 'How are you feeling?'}
-        </h1>
-        <p className="ci-sub">{selected ? 'tap to log' : 'rotate to select'}</p>
+        <h1 className="serif ci-title">{selected ? `Feeling ${selected.label}` : 'How are you feeling?'}</h1>
+        <p className="ci-sub">tap how you feel</p>
       </div>
-
-      {/* Wheel anchored to bottom-right, partially off screen */}
       <div className="wheel-anchor">
-        <div
-          className="wheel-ring"
-          ref={wheelRef}
-          onPointerDown={onDown}
-          onPointerMove={onMove}
-          onPointerUp={onUp}
-          onPointerCancel={onUp}
-          style={{ transform: `rotate(${rotation}deg)` }}
-        >
+        <div className="wheel-ring" ref={wheelRef}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+          style={{ transform: `rotate(${rotation}deg)` }}>
           {MOODS.map((mood, i) => {
-            const deg = (i / MOODS.length) * 360
-            const rad = (deg - 90) * (Math.PI / 180)
-            const R   = 38
-            const x   = 50 + R * Math.cos(rad)
-            const y   = 50 + R * Math.sin(rad)
+            const rad = ((i / MOODS.length) * 360 - 90) * (Math.PI / 180)
+            const x = 50 + 38 * Math.cos(rad), y = 50 + 38 * Math.sin(rad)
             return (
-              <div
-                key={mood.label}
-                className={`mn ${selected?.label === mood.label ? 'mn-on' : ''}`}
-                style={{
-                  left: `${x}%`, top: `${y}%`,
-                  '--mc': mood.color, '--mg': mood.glow,
-                  transform: `translate(-50%,-50%) rotate(${-rotation}deg)`,
-                }}
-                onClick={() => setSelected(mood)}
-              >
-                {selected?.label === mood.label
-                  ? <span className="mn-word" style={{ color: mood.color }}>{mood.label}</span>
-                  : null
-                }
+              <div key={mood.label} className={`mn ${selected?.label === mood.label ? 'mn-on' : ''}`}
+                style={{ left: `${x}%`, top: `${y}%`, '--mc': mood.color, '--mg': mood.glow,
+                  transform: `translate(-50%,-50%) rotate(${-rotation}deg)` }}>
+                {selected?.label === mood.label ? <span className="mn-word" style={{ color: mood.color }}>{mood.label}</span> : null}
               </div>
             )
           })}
           <div className="wheel-hub" />
         </div>
       </div>
-
-      {selected && (
-        <button
-          className="log-btn"
-          style={{ '--bc': selected.color }}
-          onClick={handleLog}
-          disabled={loading}
-        >
-          {loading ? 'Saving…' : `Log ${selected.label}`}
-        </button>
-      )}
-
-      {error && <p className="ci-err">{error}</p>}
+      {loading && <p className="ci-loading">Saving…</p>}
+      {error   && <p className="ci-err">{error}</p>}
     </div>
   )
 }
