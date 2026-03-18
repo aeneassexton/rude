@@ -74,7 +74,7 @@ export default function CheckInScreen({ api, userId, token, onForecast, onInsigh
     lastAngle.current = a; lastTime.current = now
     const next = Math.max(-MAX_ROT/2, Math.min(MAX_ROT/2, rotRef.current + delta))
     rotRef.current = next; setRotation(next)
-    const snapIdx = Math.round(((next % 360) + 360) % 360 / STEP) % MOODS.length
+    const snapIdx = ((Math.round(-next / STEP) % MOODS.length) + MOODS.length) % MOODS.length
     if (lastSnapped.current !== snapIdx) { lastSnapped.current = snapIdx; haptic('light') }
   }
 
@@ -94,7 +94,7 @@ export default function CheckInScreen({ api, userId, token, onForecast, onInsigh
 
   function snapToNearest() {
     const start = rotRef.current, target = Math.round(rotRef.current / STEP) * STEP
-    const idx   = Math.round(((target % 360) + 360) % 360 / STEP) % MOODS.length
+    const idx = ((Math.round(-target / STEP) % MOODS.length) + MOODS.length) % MOODS.length
     const startT = performance.now()
     const animate = (now) => {
       const t = Math.min((now - startT) / 220, 1)
