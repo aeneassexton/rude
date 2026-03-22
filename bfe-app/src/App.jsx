@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { supabase } from './supabaseClient'
 import AuthScreen     from './components/AuthScreen'
 import CheckInScreen  from './components/CheckInScreen'
@@ -31,6 +32,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <Analytics />
       {screen === 'checkin'  && <CheckInScreen  {...props} onForecast={() => setScreen('forecast')} onInsights={() => setScreen('rhythm')} />}
       {screen === 'forecast' && <ForecastScreen {...props} onBack={() => setScreen('checkin')} onRhythm={() => setScreen('rhythm')} />}
       {screen === 'rhythm'   && <RhythmScreen   {...props} onBack={() => setScreen('checkin')} onForecast={() => setScreen('forecast')} />}
